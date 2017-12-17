@@ -157,7 +157,7 @@ def processPacket():
         
     for i in range(0, len(packet)/4):
         nibble = packet[4*i : 4*(i+1)]
-        print nibble
+        print(nibble)
         #nibbles.append(nibble[0]*8 + nibble[1] * 4 + nibble[2] * 2 + nibble[3]);
         
         
@@ -165,7 +165,7 @@ def processPacket():
     open1 = packet[41]
     open2 = packet[42]
     print("".join('{:x}'.format(x) for x in id))
-    print open2
+    print(open2)
     
     sys.stdout.flush()
     
@@ -293,13 +293,13 @@ def go_right_1():
         acceptSignal(signal[0], signal[1])
     
     # this is all single threaded, so I should have what I need when I get to here
-    print msg
+    print(msg)
     
 
 def realMain():
      
     def callback(data):
-        print data
+        print(data)
         #msg["foo"] = data  # nb - I can't reset the outside pointer to msg, but I can reset what's inside
         #print("msg is ", msg)
          
@@ -312,7 +312,7 @@ def realMain():
         try: 
             for line in iter(sys.stdin.readline, ''):
                 signal = json.loads(line)
-                print signal
+                print(signal)
                 acceptSignal(signal[0], signal[1])
         except KeyboardInterrupt:
             break
