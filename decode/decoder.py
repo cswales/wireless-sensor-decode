@@ -25,12 +25,12 @@ that probably represents the transmitter id, but attempts to match our decoded v
 to the value printed on the sensor have so far been failures.)'''
 
 # pulse lengths in microseconds
-MIN_START_LEN = 800
-MAX_START_LEN = 1100
+MIN_START_LEN = 700
+MAX_START_LEN = 1200
 MIN_STOP_LEN = 400
 MAX_STOP_LEN = 500
 MIN_DATA_PULSE_LEN = 65
-MAX_DATA_PULSE_LEN = 120
+MAX_DATA_PULSE_LEN = 150
 MIN_LONG_LEN = 200
 MAX_LONG_LEN = 340
 MIN_SHORT_LEN = 60
@@ -148,37 +148,42 @@ def processPacket():
     
     # pull out sensor id
     id = []
-    nibbles = []
+    #nibbles = []
+    raw = []
     sensorIdStart = 12
     for i in range(0, 6):
         sensorIdByte = packet[sensorIdStart + 4*i : sensorIdStart + 4*i + 4]
         #print sensorIdByte
-        id.append(sensorIdByte[0]*8 + sensorIdByte[1] * 4 + sensorIdByte[2] * 2 + sensorIdByte[3])
-        
-    for i in range(0, len(packet)/4):
+        id.append(sensorIdByte[0]*8 + sensorIdByte[1] * 4 + sensorIdByte[2] * 2 + sensorIdByte[3])        
+    id = "".join('{:x}'.format(x) for x in id)
+
+    # print remaining nibbles
+    for i in range(9, len(packet)/4):
         nibble = packet[4*i : 4*(i+1)]
-        print(nibble)
+        raw.append(nibble)
+        #print nibble
         #nibbles.append(nibble[0]*8 + nibble[1] * 4 + nibble[2] * 2 + nibble[3]);
         
         
     # pull out open/close state
-    open1 = packet[41]
-    open2 = packet[42]
-    print("".join('{:x}'.format(x) for x in id))
-    print(open2)
+#    open1 = packet[41]
+#    open2 = packet[42]
     
     sys.stdout.flush()
     
-    if open1 != open2:
-        logger.error("Internal confusion about packet state, ignoring packet")
-        return
+
+#    if open1 != open2:
+#        logger.error("Internal confusion about packet state, ignoring packet")
+#        return
         
-    triggered = (open1 == 1)
+#    triggered = (open1 == 1)
     
     msg["id"] = id
-    msg["triggered"] = triggered
-    msg["time"] = time.time()
-    #msg["raw packet"] = 
+#    msg["triggered"] = triggered
+    msg["ts"] = time.time()
+    msg["raw"] = raw
+    
+    print json.dumps(msg)
     
     for i in range(0,len(listeners)):
         listeners[i](msg)
@@ -293,13 +298,14 @@ def go_right_1():
         acceptSignal(signal[0], signal[1])
     
     # this is all single threaded, so I should have what I need when I get to here
-    print(msg)
+    print msg
     
 
 def realMain():
      
     def callback(data):
-        print(data)
+        pass
+        #print data
         #msg["foo"] = data  # nb - I can't reset the outside pointer to msg, but I can reset what's inside
         #print("msg is ", msg)
          
@@ -312,7 +318,7 @@ def realMain():
         try: 
             for line in iter(sys.stdin.readline, ''):
                 signal = json.loads(line)
-                print(signal)
+                #print signal
                 acceptSignal(signal[0], signal[1])
         except KeyboardInterrupt:
             break

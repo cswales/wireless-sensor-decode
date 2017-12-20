@@ -79,6 +79,9 @@ static void convertToComplexFloat(unsigned char *src, float *dst, int nSamples)
     }
 }
 
+// debug
+float lastPeak;
+float lastSNR;
 
 // FFT. Used by Processing
 
@@ -200,8 +203,8 @@ eSignalState msgState;
 
 #define SYNCH_SETTLE_TIME 30
 
-int firstSynchStartTime  = 0;
-int secondSynchStartTime = 0;
+unsigned long firstSynchStartTime  = 0;
+unsigned long secondSynchStartTime = 0;
 
 
 static void resetProcessingState(void);
@@ -253,10 +256,11 @@ void processingShutDown()
 
 static void emitSignal(int startTime, int duration)
 {
-    printf("[%d, %d]\n", startTime, duration);
+    fprintf(stdout, "[%d, %d]\n", startTime, duration);
+    fflush(stdout); // yeah, the \n should flush it. Don't know wtf is happening
 }
 
-float s2nrThreshold = 0.55f;  // XXX nfc what this should be. Check empirically
+float s2nrThreshold = 0.50f;  // XXX nfc what this should be. Check empirically
 
 // XXX - I could find the transmission frequency empirically, just by looking at what it
 // is over time. Later.
@@ -268,7 +272,7 @@ static bool transmissionPresent(float *buffer, int bufferLen)
     int peak;
     float s2nr;
     if( findTransmission(buffer, bufferLen, &peak, &s2nr) ){
-        fprintf(stderr, "Peak at %d\n", peak); // XXX DEBUG only
+        //fprintf(stderr, "Peak at %d\n", peak); // XXX DEBUG only
         return (s2nr < s2nrThreshold); // since power is negative, the snr threshold points this way
     } else {
         return false;
@@ -333,7 +337,7 @@ static float signalDifferential(float *buffer1, float *buffer2, int bufferLen)
 
 //bool bInTransmission = false;
 
-long lastTransmissionTime = 0;
+unsigned long lastTransmissionTime = 0;
 
 float *signalSignature      = NULL;
 float *spaceSignature       = NULL;
@@ -344,7 +348,7 @@ float *spaceSignature       = NULL;
 #define INITIAL_SIGNAL_MAX 1200
 
 //#define ID_THRESHOLD 35.f // XXX I have no idea how big this should be
-#define ID_THRESHOLD 0.7f // XXX I have no idea how big this should be
+#define ID_THRESHOLD 0.8f // XXX I have no idea how big this should be
 
 #define END_MSG_TIMEOUT 1000 // 1 millisecond without a signal is considered to be the end of a transmission
 
@@ -463,6 +467,7 @@ static bool GE_DifferentiateSignalFromSpace(int firstSynchDuration, int secondSy
                firstSynchDuration >= INITIAL_SIGNAL_MIN) {
         startBeforeSignal = false;
     } else {
+        fprintf(stderr, "GE packet error - %d, %d\n", firstSynchDuration, secondSynchDuration);
         return false; // doesn't look like a GE Wireless packet
     }
     
@@ -481,7 +486,10 @@ static void processBuffer(float *buffer, int bufferLen)
 {
     bool transmitting = transmissionPresent(buffer, bufferLen);
     int signalType; 
-    int curTime;
+    unsigned long curTime;
+    
+    bytesProcessed += processingStride; 
+    curTime = bytesProcessed/(((float)sampleRate)/1000000);
     
     // make note of the last time we saw a transmission. This is used to change the 
     // state at the end of a message
@@ -489,10 +497,7 @@ static void processBuffer(float *buffer, int bufferLen)
         lastTransmissionTime = curTime;
     }
     
-    bytesProcessed += processingStride; 
-    curTime = bytesProcessed/(((float)sampleRate)/1000000);
-    
-    fprintf(stderr, "Processing state is %d,transmitting %d, synchState %d, curtime %d\n", processingState, transmitting, synchState, curTime);
+//    fprintf(stderr, "Processing state is %d,transmitting %d, synchState %d, curtime %d\n", processingState, transmitting, synchState, curTime);
     
     switch (processingState) {
     case NO_MESSAGE:
@@ -503,26 +508,35 @@ static void processBuffer(float *buffer, int bufferLen)
                 bytesProcessed = 0;
             }
         } else {
+            //fprintf(stderr, "Detected message, %lu\n", curTime);
             // Beginning of a message. Start the synching process.
             firstSynchStartTime = curTime;
             processingState = SYNCHING;
             synchState = FIRST_SYNCH;
+            fprintf(stderr, "Start of message - Found signal, time %lu, peak %f, snr %f\n", curTime, lastPeak, lastSNR);
         }
         break;
     case IN_MESSAGE:
         // is this space or signal? 
         if (!transmitting) {
             signalType = MSG_NO_SIGNAL;
+            //fprintf(stderr, "no signal\n");
         } else {
             signalType = identifyBuffer(buffer, bufferLen);
-        }
+            //fprintf(stderr, "Signal type is %d\n", signalType);
+        } 
+        
+        //fprintf(stderr, "Diff time is %lu\n", curTime - lastTransmissionTime);
+        //fprintf(stderr, "cur time %lu, last trans time %lu\n", curTime, lastTransmissionTime);
         
         // quick check - has the message ended? If so, change state and immediately break
         if ((signalType == MSG_NO_SIGNAL || signalType == MSG_UNKNOWN) && 
             (curTime - lastTransmissionTime > END_MSG_TIMEOUT)) {
+            fprintf(stderr, "END MESSAGE, time %lu\n", curTime);
             resetProcessingState(); 
             break;
         } 
+        
         
         // normal flow - emit signal on state change, otherwise nop
         switch (msgState){
@@ -537,6 +551,7 @@ static void processBuffer(float *buffer, int bufferLen)
             break;
         case MSG_NO_SIGNAL:
             if (signalType == MSG_SIGNAL) {
+                fprintf(stderr, "Found signal, time %lu, peak %f, snr %f\n", curTime, lastPeak, lastSNR);
                 // state changes. Set signal start time
                 msgState = MSG_SIGNAL;
                 signalStartTime = curTime;
@@ -554,9 +569,11 @@ static void processBuffer(float *buffer, int bufferLen)
             if (curTime - firstSynchStartTime >= SYNCH_SETTLE_TIME) {
                 if (transmitting) {
                     memcpy(firstSynchBuffer, buffer, bufferLen*sizeof(float));
-                    synchState = TRANSITION_TO_SECOND_SYNCH;                    
+                    synchState = TRANSITION_TO_SECOND_SYNCH;    
+                    fprintf(stderr, "FIRST SYNCH %lu\n",curTime);                
+                    fprintf(stderr, "Sync signal, time %lu, peak %f, snr %f\n", curTime, lastPeak, lastSNR);
                 } else {
-                    fprintf(stderr, "signal inconsistency in first sync\n"); // XXX - it may be better to just ignore this, or have it be only a special debug printf.
+                    //fprintf(stderr, "signal inconsistency in first sync\n"); // XXX - it may be better to just ignore this, or have it be only a special debug printf.
                 }
             } else {
                 // nop. Settling after transition to first sync.
@@ -566,6 +583,7 @@ static void processBuffer(float *buffer, int bufferLen)
             if (!transmitting || 
                 signalDifferential(firstSynchBuffer, buffer, bufferLen) < ID_THRESHOLD) { // XXX may want the threshold bigger here?
                     synchState = SECOND_SYNCH;
+                    fprintf(stderr, "SECOND SYNCH %lu\n", curTime);
                     secondSynchStartTime = curTime;
             } else {
                 // nop. Haven't found the transition point yet.
@@ -575,12 +593,14 @@ static void processBuffer(float *buffer, int bufferLen)
             if (curTime - secondSynchStartTime >= SYNCH_SETTLE_TIME) {
                 memcpy(secondSynchBuffer, buffer, bufferLen*sizeof(float));
                 synchState = TRANSITION_OUT_OF_SYNCH;
+                fprintf(stderr, "Sync signal, time %lu, peak %f, snr %f\n", curTime, lastPeak, lastSNR);
             } else {
                 // nop. Settling after transition to second sync
             }
             break;
         case TRANSITION_OUT_OF_SYNCH:
             if (signalDifferential(secondSynchBuffer, buffer, bufferLen) < ID_THRESHOLD) { // XXX may want the threshold bigger here?
+                fprintf(stderr, "CHECK SYNCHS %lu\n", curTime);
                 if (GE_DifferentiateSignalFromSpace(secondSynchStartTime - firstSynchStartTime, 
                                                      curTime - secondSynchStartTime)){
                     if (firstSynchBuffer == spaceSignature) {
@@ -657,9 +677,9 @@ static bool findTransmission(float *buffer, int bufferLen, int *peak, float *s2n
     for (int i=0; i<SLIDING_WINDOW_SIZE; i++) {
         localMaxima = MAX(localMaxima, *bufferPtr++);
     }
-    fprintf(stderr, "DEBUG - window maxima is %f, window power is %f\n", localMaxima, peakPower);
-    fprintf(stderr, "DEBUG - accPower is %f\n", accPower);
-    fprintf(stderr, "DEBUG - snr is %f, average power is %f\n", peakPower/averagePower, averagePower);
+//    fprintf(stderr, "DEBUG - window maxima is %f, window power is %f\n", localMaxima, peakPower);
+//    fprintf(stderr, "DEBUG - accPower is %f\n", accPower);
+//    fprintf(stderr, "DEBUG - snr is %f, average power is %f\n", peakPower/averagePower, averagePower);
 
     
     if (s2nr) {
@@ -669,6 +689,9 @@ static bool findTransmission(float *buffer, int bufferLen, int *peak, float *s2n
         *peak = transmissionFreqStart + SLIDING_WINDOW_SIZE/2;
     }
     
+    // XXX DEBUG
+    lastPeak = *peak;
+    lastSNR = *s2nr;
     return true;
 }
 
