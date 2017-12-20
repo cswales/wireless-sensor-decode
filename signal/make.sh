@@ -1,1 +1,1 @@
-gcc main.cpp -lfftw3f -o myfft
+gcc main.cpp -lfftw3f -lm -o myfft
