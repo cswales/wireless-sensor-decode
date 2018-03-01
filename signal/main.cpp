@@ -163,11 +163,11 @@ static float *dstBuffer = NULL;
 static float *sampleBuffer = NULL;
 static unsigned long timebase = 0;
 static bool bProcessingInit = false;
-static unsigned int sampleRate = 1000000;
+static unsigned long sampleRate = 1000000;
 static unsigned int processingStride;
 static unsigned int nChunksRead = 0;
-static unsigned int signalStartTime = 0;
-static unsigned int bytesProcessed = 0;
+static unsigned long signalStartTime = 0;
+static unsigned long bytesProcessed = 0;
 
 //static bool signalDetected = false;
 
@@ -482,15 +482,20 @@ static bool GE_DifferentiateSignalFromSpace(int firstSynchDuration, int secondSy
     return true;     
 }
 
+unsigned long prevStartTime = 0;
+unsigned long prevTime = 0;
+
 static void processBuffer(float *buffer, int bufferLen)
 {
     bool transmitting = transmissionPresent(buffer, bufferLen);
     int signalType; 
     unsigned long curTime;
-    
+ 
     bytesProcessed += processingStride; 
     curTime = bytesProcessed/(((float)sampleRate)/1000000);
-    
+    if (curTime < prevTime) printf("WRAP\n");
+    prevTime = curTime;   
+ 
     // make note of the last time we saw a transmission. This is used to change the 
     // state at the end of a message
     if (transmitting) {
@@ -505,6 +510,7 @@ static void processBuffer(float *buffer, int bufferLen)
             // reset timebase if it's been more than 5 seconds since the previous signal
             if (time(0) - timebase > 5) {
                 timebase = time(0);
+                printf("TIMEBASE RESET, time is %lu\n", timebase);
                 bytesProcessed = 0;
             }
         } else {
@@ -513,6 +519,8 @@ static void processBuffer(float *buffer, int bufferLen)
             firstSynchStartTime = curTime;
             processingState = SYNCHING;
             synchState = FIRST_SYNCH;
+            if (curTime < prevStartTime) printf("CSW WRAP!\n");
+            prevStartTime = curTime;
             fprintf(stderr, "Start of message - Found signal, time %lu, peak %f, snr %f\n", curTime, lastPeak, lastSNR);
         }
         break;
@@ -672,11 +680,11 @@ static bool findTransmission(float *buffer, int bufferLen, int *peak, float *s2n
     float peakPower    = maxWindowPower/SLIDING_WINDOW_SIZE;
     
     // for debug at least - find and print peak in window...
-    float localMaxima = -FLT_MAX;
+/*    float localMaxima = -FLT_MAX;
     bufferPtr = &buffer[transmissionFreqStart];
     for (int i=0; i<SLIDING_WINDOW_SIZE; i++) {
         localMaxima = MAX(localMaxima, *bufferPtr++);
-    }
+    }*/
 //    fprintf(stderr, "DEBUG - window maxima is %f, window power is %f\n", localMaxima, peakPower);
 //    fprintf(stderr, "DEBUG - accPower is %f\n", accPower);
 //    fprintf(stderr, "DEBUG - snr is %f, average power is %f\n", peakPower/averagePower, averagePower);
@@ -819,6 +827,7 @@ int main(int argc, char *argv[])
 
     processingInit(FFT_SIZE, rate, stride);
 
+    printf("Sample rate %d, stride %d\n", rate, stride);
     // read from file
 
     // We need to deal with a sliding window with FFT_SIZE samples. I'm going to handle
